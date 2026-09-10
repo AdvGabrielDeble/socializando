@@ -1,0 +1,35 @@
+name: Temporary GD Fiscal Review States
+
+on:
+  push:
+    branches: ["tmp-gd-fiscal-build-20260910"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review-states:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build current Windows executable
+        shell: pwsh
+        run: |
+          Set-Location _gd_build
+          $files = Get-ChildItem -Filter *.go | ForEach-Object { $_.FullName }
+          gofmt -w $files
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o GD-Fiscal-Saude-MVP-FINAL.exe .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install acceptance dependencies
+        run: python -m pip install --disable-pip-version-check openpyxl requests
+      - name: Run individual review-state contract
+        run: python .\_gd_build\review_states_acceptance.py
