@@ -1,4 +1,4 @@
-name: Temporary GD Fiscal MVP Build V2
+name: Temporary GD Fiscal MVP Build V3
 
 on:
   push:
@@ -21,7 +21,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Build Windows executable
         shell: pwsh
         run: |
@@ -31,13 +30,12 @@ jobs:
           go build -trimpath -ldflags="-s -w -H=windowsgui" -o GD-Fiscal-Saude-MVP-FINAL.exe .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path .\GD-Fiscal-Saude-MVP-FINAL.exe)) { throw 'EXE not generated' }
-
       - name: Install audit dependencies
         run: python -m pip install --disable-pip-version-check openpyxl requests
-
+      - name: Patch acceptance matcher
+        run: python .\_gd_build\patch_test.py
       - name: Run MVP operational gate
         run: python .\_gd_build\acceptance.py
-
       - name: Validation manifest
         shell: pwsh
         run: |
@@ -65,7 +63,6 @@ jobs:
             "exe_sha256=$hash"
           ) | Set-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt -Encoding UTF8
           Get-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt
-
       - name: Package release
         shell: pwsh
         run: |
@@ -73,10 +70,9 @@ jobs:
           Copy-Item .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe .\release\
           Copy-Item .\_gd_build\VALIDACAO_MVP_FINAL.txt .\release\
           Compress-Archive -Path .\release\* -DestinationPath .\GD-Fiscal-Saude-MVP-FINAL.zip -Force
-
       - uses: actions/upload-artifact@v4
         with:
-          name: GD-Fiscal-Saude-MVP-FINAL-V2
+          name: GD-Fiscal-Saude-MVP-FINAL-V3
           path: GD-Fiscal-Saude-MVP-FINAL.zip
           if-no-files-found: error
           retention-days: 3
