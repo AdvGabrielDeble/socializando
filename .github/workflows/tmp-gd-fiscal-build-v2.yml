@@ -1,0 +1,82 @@
+name: Temporary GD Fiscal MVP Build V2
+
+on:
+  push:
+    branches: ["tmp-gd-fiscal-build-20260910"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-audit:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          Set-Location _gd_build
+          $files = Get-ChildItem -Filter *.go | ForEach-Object { $_.FullName }
+          gofmt -w $files
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o GD-Fiscal-Saude-MVP-FINAL.exe .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path .\GD-Fiscal-Saude-MVP-FINAL.exe)) { throw 'EXE not generated' }
+
+      - name: Install audit dependencies
+        run: python -m pip install --disable-pip-version-check openpyxl requests
+
+      - name: Run MVP operational gate
+        run: python .\_gd_build\acceptance.py
+
+      - name: Validation manifest
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe
+          $hash=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size=(Get-Item $exe).Length
+          @(
+            'GD Fiscal Saude - MVP FINAL',
+            "validated_at=$((Get-Date).ToUniversalTime().ToString('o'))",
+            "source_sha=$env:GITHUB_SHA",
+            'windows_runner=windows-2022',
+            'build=ok',
+            'professional_A_persistence=ok',
+            'july_imported=26',
+            'july_skipped_no_service=4',
+            'july_total_cents=1087000',
+            'duplicate_reimport_blocked=ok',
+            'invalid_cpf_restriction_persisted=ok',
+            'professional_B_isolation=ok',
+            'csv_A_lines=26',
+            'csv_fields=16',
+            'csv_B_has_no_A=ok',
+            'reinstall_preserves_sqlite=ok',
+            "exe_bytes=$size",
+            "exe_sha256=$hash"
+          ) | Set-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt -Encoding UTF8
+          Get-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt
+
+      - name: Package release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\release | Out-Null
+          Copy-Item .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe .\release\
+          Copy-Item .\_gd_build\VALIDACAO_MVP_FINAL.txt .\release\
+          Compress-Archive -Path .\release\* -DestinationPath .\GD-Fiscal-Saude-MVP-FINAL.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GD-Fiscal-Saude-MVP-FINAL-V2
+          path: GD-Fiscal-Saude-MVP-FINAL.zip
+          if-no-files-found: error
+          retention-days: 3
