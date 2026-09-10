@@ -1,0 +1,11 @@
+name: CI Probe GD Fiscal
+on:
+  push:
+    branches: [ci-probe-gd-fiscal]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo PUBLIC_RUNNER_OK
+          go version
