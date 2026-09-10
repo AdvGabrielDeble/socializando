@@ -1,4 +1,4 @@
-name: Temporary GD Fiscal MVP Build FINAL
+name: Temporary GD Fiscal Review Release
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-and-audit:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -21,7 +21,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build Windows executable
+
+      - name: Build legacy executable for upgrade proof
+        shell: pwsh
+        run: |
+          Set-Location _gd_build
+          $files = Get-ChildItem -Filter *.go | ForEach-Object { $_.FullName }
+          gofmt -w $files
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o GD-Fiscal-Saude-MVP-LEGACY.exe .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path .\GD-Fiscal-Saude-MVP-LEGACY.exe)) { throw 'Legacy EXE not generated' }
+
+      - name: Apply approved review workflow
+        run: python .\_gd_build\apply_review_patch.py
+
+      - name: Build revised Windows executable
         shell: pwsh
         run: |
           Set-Location _gd_build
@@ -29,11 +43,20 @@ jobs:
           gofmt -w $files
           go build -trimpath -ldflags="-s -w -H=windowsgui" -o GD-Fiscal-Saude-MVP-FINAL.exe .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path .\GD-Fiscal-Saude-MVP-FINAL.exe)) { throw 'EXE not generated' }
+          if (-not (Test-Path .\GD-Fiscal-Saude-MVP-FINAL.exe)) { throw 'Revised EXE not generated' }
+
       - name: Install audit dependencies
         run: python -m pip install --disable-pip-version-check openpyxl requests
-      - name: Run MVP operational gate
+
+      - name: Run original MVP regression gate
         run: python .\_gd_build\acceptance_v2.py
+
+      - name: Run individual review-state gate
+        run: python .\_gd_build\review_states_acceptance.py
+
+      - name: Run upgrade and persistence gate
+        run: python .\_gd_build\review_upgrade_acceptance.py
+
       - name: Validation manifest
         shell: pwsh
         run: |
@@ -41,11 +64,12 @@ jobs:
           $hash=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $size=(Get-Item $exe).Length
           @(
-            'GD Fiscal Saude - MVP FINAL',
+            'GD Fiscal Saude - REVISAO 1.1.0',
             "validated_at=$((Get-Date).ToUniversalTime().ToString('o'))",
             "source_sha=$env:GITHUB_SHA",
             'windows_runner=windows-2022',
             'build=ok',
+            'original_mvp_regression=ok',
             'professional_A_persistence=ok',
             'july_imported=26',
             'july_skipped_no_service=4',
@@ -53,30 +77,53 @@ jobs:
             'duplicate_reimport_blocked=ok',
             'invalid_cpf_restriction_persisted=ok',
             'professional_B_isolation=ok',
-            'csv_A_lines=26',
-            'csv_fields=16',
-            'csv_B_has_no_A=ok',
-            'reinstall_preserves_sqlite=ok',
+            'csv_original_contract_16_fields=ok',
+            'individual_review=ok',
+            'status_receita_saude=ok',
+            'status_nota_fiscal=ok',
+            'status_nao_lancado_reason_required=ok',
+            'bulk_validation_only_pending=ok',
+            'csv_only_validated_receita=ok',
+            'csv_does_not_lock_review=ok',
+            'pre_confirmation_choice_correction=ok',
+            'explicit_receita_confirmation=ok',
+            'post_confirmation_lock=ok',
+            'upgrade_preserves_sqlite=ok',
+            'legacy_exported_status_restored_to_editable=ok',
             "exe_bytes=$size",
             "exe_sha256=$hash"
-          ) | Set-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt -Encoding UTF8
-          Get-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt
+          ) | Set-Content .\_gd_build\VALIDACAO_REVISAO_1.1.0.txt -Encoding UTF8
+          Get-Content .\_gd_build\VALIDACAO_REVISAO_1.1.0.txt
+
       - name: Prepare release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .\release | Out-Null
-          Copy-Item .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe .\release\
-          Copy-Item .\_gd_build\VALIDACAO_MVP_FINAL.txt .\release\
+          Copy-Item .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe .\release\GD-Fiscal-Saude-REVISAO-1.1.0.exe
+          Copy-Item .\_gd_build\VALIDACAO_REVISAO_1.1.0.txt .\release\
           @'
-          GD Fiscal Saude - MVP FINAL
+          GD Fiscal Saude - Revisao 1.1.0
 
-          Uso: extraia o arquivo baixado e execute GD-Fiscal-Saude-MVP-FINAL.exe.
-          O banco de dados permanece fora da pasta do executavel, em dados locais do Windows.
-          O pacote foi validado em Windows Server 2022 com cadastro, importacao, persistencia, separacao por profissional e exportacao CSV.
-          '@ | Set-Content .\release\LEIA-ME.txt -Encoding UTF8
+          Ajustes validados:
+          - revisão individual por lançamento;
+          - Validado para Receita Saúde;
+          - Validado para Nota Fiscal;
+          - Não lançado com motivo obrigatório;
+          - filtro por situação;
+          - Validar pendentes preserva decisões já tomadas;
+          - CSV contém somente Validado para Receita Saúde;
+          - gerar CSV não bloqueia nem altera a decisão;
+          - escolhas podem ser corrigidas até confirmação final;
+          - Confirmar lançados no Receita Saúde sela os itens e bloqueia edição posterior;
+          - migração preserva o SQLite e os dados da versão anterior.
+
+          Uso: feche a versão anterior e execute GD-Fiscal-Saude-REVISAO-1.1.0.exe.
+          O banco de dados permanece na área local persistente do Windows.
+          '@ | Set-Content .\release\LEIA-ME-REVISAO.txt -Encoding UTF8
+
       - uses: actions/upload-artifact@v4
         with:
-          name: GD-Fiscal-Saude-MVP-FINAL-DIRETO
+          name: GD-Fiscal-Saude-REVISAO-1.1.0
           path: release/*
           if-no-files-found: error
           retention-days: 3
