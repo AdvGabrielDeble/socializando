@@ -3,15 +3,10 @@
 package main
 
 import (
-	cryptosha256 "crypto/sha256"
 	"errors"
 	"strings"
 	"time"
 )
-
-var sha256 = struct {
-	Sum256 func([]byte) [32]byte
-}{Sum256: cryptosha256.Sum256}
 
 func parseUserDate(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)

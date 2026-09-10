@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -18,15 +19,15 @@ import (
 )
 
 var (
-	winSQLiteDLL       = syscall.NewLazyDLL("winsqlite3.dll")
-	procSQLiteOpen     = winSQLiteDLL.NewProc("sqlite3_open")
-	procSQLiteClose    = winSQLiteDLL.NewProc("sqlite3_close")
-	procSQLiteExec     = winSQLiteDLL.NewProc("sqlite3_exec")
-	procSQLiteFree     = winSQLiteDLL.NewProc("sqlite3_free")
-	procSQLiteErrmsg   = winSQLiteDLL.NewProc("sqlite3_errmsg")
-	procSQLiteLastID   = winSQLiteDLL.NewProc("sqlite3_last_insert_rowid")
-	procSQLiteChanges  = winSQLiteDLL.NewProc("sqlite3_changes")
-	procSQLiteBusy     = winSQLiteDLL.NewProc("sqlite3_busy_timeout")
+	winSQLiteDLL = syscall.NewLazyDLL("winsqlite3.dll")
+	procSQLiteOpen = winSQLiteDLL.NewProc("sqlite3_open")
+	procSQLiteClose = winSQLiteDLL.NewProc("sqlite3_close")
+	procSQLiteExec = winSQLiteDLL.NewProc("sqlite3_exec")
+	procSQLiteFree = winSQLiteDLL.NewProc("sqlite3_free")
+	procSQLiteErrmsg = winSQLiteDLL.NewProc("sqlite3_errmsg")
+	procSQLiteLastID = winSQLiteDLL.NewProc("sqlite3_last_insert_rowid")
+	procSQLiteChanges = winSQLiteDLL.NewProc("sqlite3_changes")
+	procSQLiteBusy = winSQLiteDLL.NewProc("sqlite3_busy_timeout")
 )
 
 type queryCollector struct { rows []map[string]string }
@@ -43,12 +44,7 @@ func cString(ptr uintptr) string { if ptr == 0 { return "" }; buf := make([]byte
 func cBytes(s string)([]byte,error){ if strings.IndexByte(s,0)>=0{return nil,errors.New("texto contém byte NUL")}; return append([]byte(s),0),nil }
 
 type winDB struct { handle uintptr; mu sync.Mutex }
-func openWinDB(file string)(*winDB,error){
-	if err:=winSQLiteDLL.Load();err!=nil{return nil,fmt.Errorf("SQLite nativo do Windows indisponível: %w",err)}
-	b,err:=cBytes(file);if err!=nil{return nil,err};var handle uintptr;rc,_,_:=procSQLiteOpen.Call(uintptr(unsafe.Pointer(&b[0])),uintptr(unsafe.Pointer(&handle)));runtime.KeepAlive(b)
-	if int32(rc)!=0||handle==0{if handle!=0{msg:=cStringFromDB(handle);procSQLiteClose.Call(handle);return nil,fmt.Errorf("não foi possível abrir o banco SQLite: %s",msg)};return nil,fmt.Errorf("não foi possível abrir o banco SQLite (código %d)",int32(rc))}
-	db:=&winDB{handle:handle};procSQLiteBusy.Call(handle,5000);if err:=db.Exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");err!=nil{db.Close();return nil,err};return db,nil
-}
+func openWinDB(file string)(*winDB,error){if err:=winSQLiteDLL.Load();err!=nil{return nil,fmt.Errorf("SQLite nativo do Windows indisponível: %w",err)};b,err:=cBytes(file);if err!=nil{return nil,err};var handle uintptr;rc,_,_:=procSQLiteOpen.Call(uintptr(unsafe.Pointer(&b[0])),uintptr(unsafe.Pointer(&handle)));runtime.KeepAlive(b);if int32(rc)!=0||handle==0{if handle!=0{msg:=cStringFromDB(handle);procSQLiteClose.Call(handle);return nil,fmt.Errorf("não foi possível abrir o banco SQLite: %s",msg)};return nil,fmt.Errorf("não foi possível abrir o banco SQLite (código %d)",int32(rc))};db:=&winDB{handle:handle};procSQLiteBusy.Call(handle,5000);if err:=db.Exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");err!=nil{db.Close();return nil,err};return db,nil}
 func cStringFromDB(handle uintptr)string{p,_,_:=procSQLiteErrmsg.Call(handle);return cString(p)}
 func (db *winDB) Close()error{db.mu.Lock();defer db.mu.Unlock();if db.handle==0{return nil};rc,_,_:=procSQLiteClose.Call(db.handle);if int32(rc)!=0{return fmt.Errorf("falha ao fechar SQLite: %s",cStringFromDB(db.handle))};db.handle=0;return nil}
 func (db *winDB) execUnlocked(sql string)error{b,err:=cBytes(sql);if err!=nil{return err};var errPtr uintptr;rc,_,_:=procSQLiteExec.Call(db.handle,uintptr(unsafe.Pointer(&b[0])),0,0,uintptr(unsafe.Pointer(&errPtr)));runtime.KeepAlive(b);if int32(rc)!=0{msg:=cString(errPtr);if errPtr!=0{procSQLiteFree.Call(errPtr)};if msg==""{msg=cStringFromDB(db.handle)};return fmt.Errorf("SQLite: %s",msg)};if errPtr!=0{procSQLiteFree.Call(errPtr)};return nil}
