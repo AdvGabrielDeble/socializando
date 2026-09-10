@@ -1,24 +1,141 @@
-name: CI Probe GD Fiscal
+name: GD Fiscal MVP Final Builder
 on:
   push:
     branches: [ci-probe-gd-fiscal]
+    paths:
+      - '__gd_fiscal_build/BUILD_TRIGGER'
 permissions:
   contents: read
 jobs:
-  probe:
+  build-audit:
     runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: __gd_fiscal_build
     steps:
-      - name: Check sibling private repository access
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Resolve dependencies
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
+        run: go mod tidy
+      - name: Unit and parser audit
+        shell: pwsh
+        run: go test -v ./...
+      - name: Build final Windows executable
+        shell: pwsh
         run: |
-          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build -trimpath -ldflags "-H windowsgui -s -w" -o dist/GD-Fiscal-Saude-MVP-FINAL.exe .
+          if (-not (Test-Path dist/GD-Fiscal-Saude-MVP-FINAL.exe)) { throw 'EXE não gerado' }
+      - name: Exact executable business acceptance
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'gd-fiscal-exe-acceptance'
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $root | Out-Null
+          $report = Join-Path $root 'ACCEPTANCE_EXE.txt'
+          $p = Start-Process -FilePath (Resolve-Path 'dist/GD-Fiscal-Saude-MVP-FINAL.exe') -ArgumentList @('--selftest','--data-root',$root,'--report',$report) -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Selftest EXE falhou: $($p.ExitCode)" }
+          $txt = Get-Content $report -Raw
+          if ($txt -notmatch 'MVP_ACCEPTANCE_OK') { throw 'Relatório não confirmou MVP_ACCEPTANCE_OK' }
+          Copy-Item $report dist/ACCEPTANCE_EXE.txt -Force
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { $iscc = 'C:\Program Files\Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe não encontrado' }
+          & $iscc installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup falhou: $LASTEXITCODE" }
+      - name: Fresh install and HTTP smoke
+        shell: pwsh
+        run: |
+          $installer = Resolve-Path 'installer_output/GD-Solucoes-Fiscal-Saude-MVP-FINAL.exe'
+          $install = Join-Path $env:RUNNER_TEMP 'gd-fiscal-installed'
+          $data = Join-Path $env:RUNNER_TEMP 'gd-fiscal-http-data'
+          Remove-Item $install,$data -Recurse -Force -ErrorAction SilentlyContinue
+          $pi = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$install") -Wait -PassThru
+          if ($pi.ExitCode -ne 0) { throw "Instalação limpa falhou: $($pi.ExitCode)" }
+          $exe = Join-Path $install 'GD-Fiscal-Saude-MVP-FINAL.exe'
+          if (-not (Test-Path $exe)) { throw 'EXE instalado não encontrado' }
+          $env:GD_FISCAL_SAUDE_DATA_DIR = $data
+          $env:GD_FISCAL_SAUDE_TEST_MODE = '1'
+          $proc = Start-Process -FilePath $exe -PassThru
           try {
-            $r = Invoke-WebRequest -Uri "https://api.github.com/repos/AdvGabrielDeble/gd-solucoes-fiscal-saude/contents/requirements.txt?ref=fix/multi-professional-import-filter" -Headers $headers -UseBasicParsing
-            Write-Host "PRIVATE_REPO_HTTP=$($r.StatusCode)"
-          } catch {
-            if ($_.Exception.Response) { Write-Host "PRIVATE_REPO_HTTP=$([int]$_.Exception.Response.StatusCode)" }
-            else { Write-Host "PRIVATE_REPO_HTTP=ERROR" }
+            $portFile = Join-Path $data 'runtime\port.txt'
+            $deadline = (Get-Date).AddSeconds(35)
+            while ((Get-Date) -lt $deadline -and -not (Test-Path $portFile)) {
+              if ($proc.HasExited) { throw "App instalado encerrou: $($proc.ExitCode)" }
+              Start-Sleep -Milliseconds 400
+            }
+            if (-not (Test-Path $portFile)) { throw 'port.txt não criado' }
+            $port = (Get-Content $portFile -Raw).Trim()
+            $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 5
+            if ($r.StatusCode -ne 200 -or $r.Content -notmatch 'ok') { throw 'Health check falhou' }
+          } finally {
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
-          echo PUBLIC_WINDOWS_RUNNER_OK
+      - name: Installed operational gate 1-9
+        shell: pwsh
+        run: |
+          $install = Join-Path $env:RUNNER_TEMP 'gd-fiscal-installed'
+          $exe = Join-Path $install 'GD-Fiscal-Saude-MVP-FINAL.exe'
+          $data = Join-Path $env:RUNNER_TEMP 'gd-fiscal-installed-acceptance'
+          Remove-Item $data -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $report = Join-Path $data 'ACCEPTANCE_INSTALLED.txt'
+          $p = Start-Process -FilePath $exe -ArgumentList @('--selftest','--data-root',$data,'--report',$report) -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Acceptance instalado falhou: $($p.ExitCode)" }
+          if ((Get-Content $report -Raw) -notmatch 'MVP_ACCEPTANCE_OK') { throw 'Acceptance instalado sem selo OK' }
+          Copy-Item $report dist/ACCEPTANCE_INSTALLED.txt -Force
+      - name: Reinstall persistence gate 10
+        shell: pwsh
+        run: |
+          $installer = Resolve-Path 'installer_output/GD-Solucoes-Fiscal-Saude-MVP-FINAL.exe'
+          $install = Join-Path $env:RUNNER_TEMP 'gd-fiscal-reinstall'
+          $data = Join-Path $env:RUNNER_TEMP 'gd-fiscal-reinstall-data'
+          Remove-Item $install,$data -Recurse -Force -ErrorAction SilentlyContinue
+          $p1 = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$install") -Wait -PassThru
+          if ($p1.ExitCode -ne 0) { throw 'Primeira instalação falhou' }
+          $exe = Join-Path $install 'GD-Fiscal-Saude-MVP-FINAL.exe'
+          $r1 = Join-Path $data 'seed.txt'
+          $s = Start-Process -FilePath $exe -ArgumentList @('--seed-reinstall','--data-root',$data,'--report',$r1) -Wait -PassThru
+          if ($s.ExitCode -ne 0) { throw 'Seed de persistência falhou' }
+          $db = Join-Path $data 'database\fiscal_saude.sqlite3'
+          if (-not (Test-Path $db)) { throw 'SQLite não foi criado' }
+          $hashBefore = (Get-FileHash $db -Algorithm SHA256).Hash
+          $p2 = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/FORCECLOSEAPPLICATIONS',"/DIR=$install") -Wait -PassThru
+          if ($p2.ExitCode -ne 0) { throw 'Reinstalação falhou' }
+          if (-not (Test-Path $db)) { throw 'SQLite desapareceu na reinstalação' }
+          $r2 = Join-Path $data 'verify.txt'
+          $v = Start-Process -FilePath $exe -ArgumentList @('--verify-reinstall','--data-root',$data,'--report',$r2) -Wait -PassThru
+          if ($v.ExitCode -ne 0) { throw 'Verificação pós-reinstalação falhou' }
+          if ((Get-Content $r2 -Raw) -notmatch 'REINSTALL_PERSISTENCE_OK') { throw 'Persistência não confirmada' }
+          Copy-Item $r2 dist/REINSTALL_PERSISTENCE.txt -Force
+      - name: Final integrity
+        shell: pwsh
+        run: |
+          $installer = Resolve-Path 'installer_output/GD-Solucoes-Fiscal-Saude-MVP-FINAL.exe'
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = (Get-Item $installer).Length
+          if ($size -le 0 -or $hash -notmatch '^[0-9a-f]{64}$') { throw 'Integridade final inválida' }
+          @("MVP_FINAL_GREEN","sha256=$hash","bytes=$size","gate_1_9=ok","gate_10=ok") | Set-Content 'installer_output/VALIDACAO_MVP_FINAL.txt' -Encoding UTF8
+          Write-Host "FINAL_SHA256=$hash"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GD-Fiscal-Saude-MVP-FINAL
+          path: |
+            __gd_fiscal_build/installer_output/GD-Solucoes-Fiscal-Saude-MVP-FINAL.exe
+            __gd_fiscal_build/installer_output/VALIDACAO_MVP_FINAL.txt
+            __gd_fiscal_build/dist/GD-Fiscal-Saude-MVP-FINAL.exe
+            __gd_fiscal_build/dist/ACCEPTANCE_EXE.txt
+            __gd_fiscal_build/dist/ACCEPTANCE_INSTALLED.txt
+            __gd_fiscal_build/dist/REINSTALL_PERSISTENCE.txt
+          if-no-files-found: error
