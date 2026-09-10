@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parent
 
@@ -10,11 +11,18 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def regex_replace_once(text: str, pattern: str, replacement: str, label: str) -> str:
+    updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"{label}: expected exactly one match, found {count}")
+    return updated
+
+
 main_path = ROOT / "main.go"
 main = main_path.read_text(encoding="utf-8")
-main = replace_once(
+main = regex_replace_once(
     main,
-    'mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK); _, _ = io.WriteString(w, "ok") })',
+    r'mux\.HandleFunc\("/health",\s*func\(w http\.ResponseWriter, _ \*http\.Request\)\s*\{\s*w\.WriteHeader\(http\.StatusOK\)\s*_, _ = io\.WriteString\(w, "ok"\)\s*\}\)',
     'mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.Header().Set("X-GD-Fiscal-Version", AppVersion); w.WriteHeader(http.StatusOK); _, _ = io.WriteString(w, "ok") })',
     "health version header",
 )
