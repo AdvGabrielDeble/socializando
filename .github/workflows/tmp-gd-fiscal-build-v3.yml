@@ -1,4 +1,4 @@
-name: Temporary GD Fiscal MVP Build V3
+name: Temporary GD Fiscal MVP Build FINAL
 
 on:
   push:
@@ -32,10 +32,8 @@ jobs:
           if (-not (Test-Path .\GD-Fiscal-Saude-MVP-FINAL.exe)) { throw 'EXE not generated' }
       - name: Install audit dependencies
         run: python -m pip install --disable-pip-version-check openpyxl requests
-      - name: Patch acceptance matcher
-        run: python .\_gd_build\patch_test.py
       - name: Run MVP operational gate
-        run: python .\_gd_build\acceptance.py
+        run: python .\_gd_build\acceptance_v2.py
       - name: Validation manifest
         shell: pwsh
         run: |
@@ -69,10 +67,17 @@ jobs:
           New-Item -ItemType Directory -Force .\release | Out-Null
           Copy-Item .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe .\release\
           Copy-Item .\_gd_build\VALIDACAO_MVP_FINAL.txt .\release\
+          @'
+          GD Fiscal Saude - MVP FINAL
+
+          Uso: extraia o ZIP e execute GD-Fiscal-Saude-MVP-FINAL.exe.
+          O banco de dados permanece fora da pasta do executavel, em dados locais do Windows.
+          O pacote foi validado em Windows Server 2022 com cadastro, importacao, persistencia, separacao por profissional e exportacao CSV.
+          '@ | Set-Content .\release\LEIA-ME.txt -Encoding UTF8
           Compress-Archive -Path .\release\* -DestinationPath .\GD-Fiscal-Saude-MVP-FINAL.zip -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: GD-Fiscal-Saude-MVP-FINAL-V3
+          name: GD-Fiscal-Saude-MVP-FINAL
           path: GD-Fiscal-Saude-MVP-FINAL.zip
           if-no-files-found: error
           retention-days: 3
