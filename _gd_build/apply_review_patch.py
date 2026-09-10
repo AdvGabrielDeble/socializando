@@ -14,6 +14,12 @@ main_path = ROOT / "main.go"
 main = main_path.read_text(encoding="utf-8")
 main = replace_once(
     main,
+    'mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK); _, _ = io.WriteString(w, "ok") })',
+    'mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.Header().Set("X-GD-Fiscal-Version", AppVersion); w.WriteHeader(http.StatusOK); _, _ = io.WriteString(w, "ok") })',
+    "health version header",
+)
+main = replace_once(
+    main,
     'mux.HandleFunc("/payments", a.payments)\n\tmux.HandleFunc("/payments/validate", a.validatePayments)',
     'mux.HandleFunc("/payments", a.paymentsV2)\n\tmux.HandleFunc("/payments/review", a.reviewPayment)\n\tmux.HandleFunc("/payments/validate", a.validatePayments)\n\tmux.HandleFunc("/payments/confirm-receita", a.confirmReceita)',
     "payments routes",
@@ -31,7 +37,7 @@ core = core_path.read_text(encoding="utf-8")
 core = replace_once(
     core,
     'AppVersion    = "1.0.0-mvp"',
-    'AppVersion    = "1.1.0-mvp-review"',
+    'AppVersion    = "1.1.1-mvp-review-live-update"',
     "app version",
 )
 core_path.write_text(core, encoding="utf-8")
