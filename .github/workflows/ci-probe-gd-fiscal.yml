@@ -4,8 +4,8 @@ on:
     branches: [ci-probe-gd-fiscal]
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
     steps:
       - run: |
-          echo PUBLIC_RUNNER_OK
+          echo PUBLIC_WINDOWS_RUNNER_OK
           go version
