@@ -20,9 +20,9 @@ def regex_replace_once(text: str, pattern: str, replacement: str, label: str) ->
 
 main_path = ROOT / "main.go"
 main = main_path.read_text(encoding="utf-8")
-main = regex_replace_once(
+main = replace_once(
     main,
-    r'mux\.HandleFunc\("/health",\s*func\(w http\.ResponseWriter, _ \*http\.Request\)\s*\{\s*w\.WriteHeader\(http\.StatusOK\)\s*_, _ = io\.WriteString\(w, "ok"\)\s*\}\)',
+    'mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK); _, _ = io.WriteString(w, "ok") })',
     'mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.Header().Set("X-GD-Fiscal-Version", AppVersion); w.WriteHeader(http.StatusOK); _, _ = io.WriteString(w, "ok") })',
     "health version header",
 )
