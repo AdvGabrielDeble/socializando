@@ -2,10 +2,23 @@ name: CI Probe GD Fiscal
 on:
   push:
     branches: [ci-probe-gd-fiscal]
+permissions:
+  contents: read
 jobs:
   probe:
     runs-on: windows-2022
     steps:
-      - run: |
+      - name: Check sibling private repository access
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+          try {
+            $r = Invoke-WebRequest -Uri "https://api.github.com/repos/AdvGabrielDeble/gd-solucoes-fiscal-saude/contents/requirements.txt?ref=fix/multi-professional-import-filter" -Headers $headers -UseBasicParsing
+            Write-Host "PRIVATE_REPO_HTTP=$($r.StatusCode)"
+          } catch {
+            if ($_.Exception.Response) { Write-Host "PRIVATE_REPO_HTTP=$([int]$_.Exception.Response.StatusCode)" }
+            else { Write-Host "PRIVATE_REPO_HTTP=ERROR" }
+          }
           echo PUBLIC_WINDOWS_RUNNER_OK
-          go version
