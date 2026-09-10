@@ -1,7 +1,6 @@
 package main
 
 import (
-    "path/filepath"
     "testing"
 )
 
@@ -10,6 +9,10 @@ func TestCPFValidation(t *testing.T) {
         if !cpfValid(cpf) { t.Fatalf("CPF válido rejeitado: %s", cpf) }
     }
     if cpfValid("12345678901") { t.Fatal("CPF inválido aceito") }
+    for i := 1; i <= 30; i++ {
+        cpf := validCPF(i)
+        if !cpfValid(cpf) { t.Fatalf("gerador produziu CPF inválido seed=%d cpf=%s", i, cpf) }
+    }
 }
 
 func TestJulyParserContract(t *testing.T) {
@@ -17,7 +20,9 @@ func TestJulyParserContract(t *testing.T) {
     if err != nil { t.Fatal(err) }
     p, err := parseWorkbook(raw)
     if err != nil { t.Fatal(err) }
-    if len(p.Valid) != 26 { t.Fatalf("valid=%d", len(p.Valid)) }
+    firstReason := ""
+    if len(p.Restricted) > 0 { firstReason = p.Restricted[0].Reason }
+    if len(p.Valid) != 26 { t.Fatalf("valid=%d skipped=%d restricted=%d structural=%d first_reason=%q cpf1=%s", len(p.Valid), len(p.Skipped), len(p.Restricted), len(p.Structural), firstReason, validCPF(1)) }
     if len(p.Skipped) != 4 { t.Fatalf("skipped=%d", len(p.Skipped)) }
     if len(p.Restricted) != 0 { t.Fatalf("restricted=%d", len(p.Restricted)) }
     if len(p.Structural) != 0 { t.Fatalf("structural=%d", len(p.Structural)) }
@@ -40,6 +45,8 @@ func TestPersistenceIsolationDuplicateAndExport(t *testing.T) {
     root := t.TempDir()
     a, err := newApp(root)
     if err != nil { t.Fatal(err) }
+    closed := false
+    defer func(){ if !closed { _ = a.db.Close() } }()
     idA, err := a.addProfessional("Profissional A", "52998224725", "PSICOLOGO", "07/10000", "RS")
     if err != nil { t.Fatal(err) }
     raw, _ := syntheticJulyWorkbook()
@@ -53,10 +60,12 @@ func TestPersistenceIsolationDuplicateAndExport(t *testing.T) {
     if err != nil { t.Fatal(err) }
     if created != 0 || restricted != 0 || duplicates != 26 { t.Fatalf("duplicate import=%d/%d/%d", created, restricted, duplicates) }
     if err := a.db.Close(); err != nil { t.Fatal(err) }
+    closed = true
 
     a, err = newApp(root)
     if err != nil { t.Fatal(err) }
-    defer a.db.Close()
+    closed = false
+    defer func(){ if !closed { _ = a.db.Close() } }()
     c, total, err := countAndTotal(a.db, idA)
     if err != nil || c != 26 || total != 1087000 { t.Fatalf("persistence=%d/%d/%v", c, total, err) }
 
@@ -77,6 +86,5 @@ func TestPersistenceIsolationDuplicateAndExport(t *testing.T) {
     if err != nil { t.Fatal(err) }
     if len(rows) != 26 || exportTotal != 1087000 { t.Fatalf("export=%d/%d", len(rows), exportTotal) }
     for _, row := range rows { if len(row) != 16 || row[14] != "52998224725" { t.Fatal("CSV misturou profissional ou não tem 16 campos") } }
-
-    if _, err := filepath.Abs(root); err != nil { t.Fatal(err) }
+    _ = a.db.Close(); closed = true
 }
