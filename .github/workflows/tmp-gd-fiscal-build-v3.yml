@@ -61,7 +61,7 @@ jobs:
             "exe_sha256=$hash"
           ) | Set-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt -Encoding UTF8
           Get-Content .\_gd_build\VALIDACAO_MVP_FINAL.txt
-      - name: Package release
+      - name: Prepare release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .\release | Out-Null
@@ -70,14 +70,13 @@ jobs:
           @'
           GD Fiscal Saude - MVP FINAL
 
-          Uso: extraia o ZIP e execute GD-Fiscal-Saude-MVP-FINAL.exe.
+          Uso: extraia o arquivo baixado e execute GD-Fiscal-Saude-MVP-FINAL.exe.
           O banco de dados permanece fora da pasta do executavel, em dados locais do Windows.
           O pacote foi validado em Windows Server 2022 com cadastro, importacao, persistencia, separacao por profissional e exportacao CSV.
           '@ | Set-Content .\release\LEIA-ME.txt -Encoding UTF8
-          Compress-Archive -Path .\release\* -DestinationPath .\GD-Fiscal-Saude-MVP-FINAL.zip -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: GD-Fiscal-Saude-MVP-FINAL
-          path: GD-Fiscal-Saude-MVP-FINAL.zip
+          name: GD-Fiscal-Saude-MVP-FINAL-DIRETO
+          path: release/*
           if-no-files-found: error
           retention-days: 3
