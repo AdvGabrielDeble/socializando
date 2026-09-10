@@ -1,4 +1,4 @@
-name: Temporary GD Fiscal Review Release
+name: Temporary GD Fiscal Review Release 1.1.1
 
 on:
   push:
@@ -41,9 +41,10 @@ jobs:
           Set-Location _gd_build
           $files = Get-ChildItem -Filter *.go | ForEach-Object { $_.FullName }
           gofmt -w $files
-          go build -trimpath -ldflags="-s -w -H=windowsgui" -o GD-Fiscal-Saude-MVP-FINAL.exe .
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o GD-Fiscal-Saude-REVISAO-1.1.1.exe .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path .\GD-Fiscal-Saude-MVP-FINAL.exe)) { throw 'Revised EXE not generated' }
+          if (-not (Test-Path .\GD-Fiscal-Saude-REVISAO-1.1.1.exe)) { throw 'Revised EXE not generated' }
+          Copy-Item .\GD-Fiscal-Saude-REVISAO-1.1.1.exe .\GD-Fiscal-Saude-MVP-FINAL.exe
 
       - name: Install audit dependencies
         run: python -m pip install --disable-pip-version-check openpyxl requests
@@ -57,14 +58,17 @@ jobs:
       - name: Run upgrade and persistence gate
         run: python .\_gd_build\review_upgrade_acceptance.py
 
+      - name: Run live-instance update regression gate
+        run: python .\_gd_build\live_upgrade_acceptance.py
+
       - name: Validation manifest
         shell: pwsh
         run: |
-          $exe = Resolve-Path .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe
+          $exe = Resolve-Path .\_gd_build\GD-Fiscal-Saude-REVISAO-1.1.1.exe
           $hash=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $size=(Get-Item $exe).Length
           @(
-            'GD Fiscal Saude - REVISAO 1.1.0',
+            'GD Fiscal Saude - REVISAO 1.1.1',
             "validated_at=$((Get-Date).ToUniversalTime().ToString('o'))",
             "source_sha=$env:GITHUB_SHA",
             'windows_runner=windows-2022',
@@ -90,19 +94,21 @@ jobs:
             'post_confirmation_lock=ok',
             'upgrade_preserves_sqlite=ok',
             'legacy_exported_status_restored_to_editable=ok',
+            'live_old_instance_replaced=ok',
+            'new_ui_served_after_live_update=ok',
             "exe_bytes=$size",
             "exe_sha256=$hash"
-          ) | Set-Content .\_gd_build\VALIDACAO_REVISAO_1.1.0.txt -Encoding UTF8
-          Get-Content .\_gd_build\VALIDACAO_REVISAO_1.1.0.txt
+          ) | Set-Content .\_gd_build\VALIDACAO_REVISAO_1.1.1.txt -Encoding UTF8
+          Get-Content .\_gd_build\VALIDACAO_REVISAO_1.1.1.txt
 
       - name: Prepare release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .\release | Out-Null
-          Copy-Item .\_gd_build\GD-Fiscal-Saude-MVP-FINAL.exe .\release\GD-Fiscal-Saude-REVISAO-1.1.0.exe
-          Copy-Item .\_gd_build\VALIDACAO_REVISAO_1.1.0.txt .\release\
+          Copy-Item .\_gd_build\GD-Fiscal-Saude-REVISAO-1.1.1.exe .\release\
+          Copy-Item .\_gd_build\VALIDACAO_REVISAO_1.1.1.txt .\release\
           @'
-          GD Fiscal Saude - Revisao 1.1.0
+          GD Fiscal Saude - Revisao 1.1.1
 
           Ajustes validados:
           - revisão individual por lançamento;
@@ -115,15 +121,16 @@ jobs:
           - gerar CSV não bloqueia nem altera a decisão;
           - escolhas podem ser corrigidas até confirmação final;
           - Confirmar lançados no Receita Saúde sela os itens e bloqueia edição posterior;
-          - migração preserva o SQLite e os dados da versão anterior.
+          - migração preserva o SQLite e os dados da versão anterior;
+          - ao executar esta revisão com a versão antiga ainda ativa, o atualizador encerra somente a instância GD que ocupa a porta local, substitui o executável instalado e inicia a versão nova automaticamente.
 
-          Uso: feche a versão anterior e execute GD-Fiscal-Saude-REVISAO-1.1.0.exe.
+          Uso: execute GD-Fiscal-Saude-REVISAO-1.1.1.exe. A atualização foi testada inclusive com a versão anterior ainda rodando em segundo plano.
           O banco de dados permanece na área local persistente do Windows.
           '@ | Set-Content .\release\LEIA-ME-REVISAO.txt -Encoding UTF8
 
       - uses: actions/upload-artifact@v4
         with:
-          name: GD-Fiscal-Saude-REVISAO-1.1.0
+          name: GD-Fiscal-Saude-REVISAO-1.1.1
           path: release/*
           if-no-files-found: error
           retention-days: 3
