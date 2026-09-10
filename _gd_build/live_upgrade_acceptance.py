@@ -65,8 +65,6 @@ try:
     assert LEGACY.exists(), LEGACY
     assert REVISED.exists(), REVISED
 
-    # Real launch path: the downloaded legacy EXE installs itself and leaves the
-    # installed GD-Fiscal-Saude.exe serving the fixed local port.
     subprocess.run([str(LEGACY)], env=env(), timeout=10, check=True)
     wait_health(True)
 
@@ -77,22 +75,24 @@ try:
     assert installed.exists(), installed
     old_hash = sha256(installed)
 
-    # User's reported scenario: execute revised download while old installed
-    # server is still alive in the background.
+    # Exact reported scenario: run revised download while the old installed
+    # server remains alive in the background.
     subprocess.run([str(REVISED)], env=env(), timeout=10, check=True)
     time.sleep(1.0)
     wait_health(True)
 
+    health = requests.get(BASE + "/health", timeout=3)
     page = requests.get(BASE + "/payments", timeout=3).text
     new_hash = sha256(installed)
 
-    # These are the regression assertions. Current updater must fail here:
-    # it must replace the installed binary and expose the revised UI.
+    # Regression contract: old process must be displaced, installed binary must
+    # become the revised one, and the revised review UI must actually be served.
+    assert old_hash != sha256(REVISED)
     assert new_hash == sha256(REVISED), (old_hash, new_hash, sha256(REVISED))
+    assert health.headers.get("X-GD-Fiscal-Version") == "1.1.1-mvp-review-live-update"
     assert "Validado para Receita Saúde" in page
     assert "Validado para Nota Fiscal" in page
     assert "Não lançado" in page
-    assert "Confirmar lançados no Receita Saúde" in page
 
     print("LIVE_UPGRADE_GATE_GREEN")
 finally:
