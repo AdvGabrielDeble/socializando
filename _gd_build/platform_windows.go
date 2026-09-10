@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -64,37 +65,116 @@ func serverAlive() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+func runningServerVersion() string {
+	client := &http.Client{Timeout: 450 * time.Millisecond}
+	resp, err := client.Get("http://127.0.0.1:" + localPort + "/health")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	return strings.TrimSpace(resp.Header.Get("X-GD-Fiscal-Version"))
+}
+
+func stopServerOnPort() error {
+	out, err := exec.Command("netstat", "-ano", "-p", "tcp").Output()
+	if err == nil {
+		seen := map[int]bool{}
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 4 || !strings.EqualFold(fields[0], "TCP") {
+				continue
+			}
+			if !strings.HasSuffix(fields[1], ":"+localPort) {
+				continue
+			}
+			pid, parseErr := strconv.Atoi(fields[len(fields)-1])
+			if parseErr != nil || pid <= 0 || pid == os.Getpid() || seen[pid] {
+				continue
+			}
+			seen[pid] = true
+			_ = exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F").Run()
+		}
+	}
+	for i := 0; i < 50; i++ {
+		if !serverAlive() {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return errors.New("não foi possível encerrar a versão anterior do GD Fiscal Saúde; feche-a pelo Gerenciador de Tarefas e execute a atualização novamente")
+}
+
 func copyExecutable(src, dst string) error {
 	in, err := os.Open(src)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer in.Close()
 	tmp := dst + ".new"
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	_, copyErr := io.Copy(out, in)
 	syncErr := out.Sync()
 	closeErr := out.Close()
-	if copyErr != nil { _ = os.Remove(tmp); return copyErr }
-	if syncErr != nil { _ = os.Remove(tmp); return syncErr }
-	if closeErr != nil { _ = os.Remove(tmp); return closeErr }
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return copyErr
+	}
+	if syncErr != nil {
+		_ = os.Remove(tmp)
+		return syncErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
+	}
 	_ = os.Remove(dst)
-	if err := os.Rename(tmp, dst); err != nil { _ = os.Remove(tmp); return err }
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
 	return nil
 }
 
 func preparePlatform() (bool, error) {
-	if os.Getenv("GD_FISCAL_SAUDE_TEST_MODE") == "1" { return true, nil }
-	if serverAlive() {
-		openBrowser("http://127.0.0.1:" + localPort + "/")
-		return false, nil
+	if os.Getenv("GD_FISCAL_SAUDE_TEST_MODE") == "1" {
+		return true, nil
 	}
-	current, err := os.Executable(); if err != nil { return false, err }
-	target, err := installTarget(); if err != nil { return false, err }
-	if samePath(current, target) { return true, nil }
-	if err := copyExecutable(current, target); err != nil { return false, err }
+	current, err := os.Executable()
+	if err != nil {
+		return false, err
+	}
+	target, err := installTarget()
+	if err != nil {
+		return false, err
+	}
+
+	if serverAlive() {
+		if runningServerVersion() == AppVersion {
+			openBrowser("http://127.0.0.1:" + localPort + "/")
+			return false, nil
+		}
+		if err := stopServerOnPort(); err != nil {
+			return false, err
+		}
+	}
+
+	if samePath(current, target) {
+		return true, nil
+	}
+	if err := copyExecutable(current, target); err != nil {
+		return false, err
+	}
 	cmd := exec.Command(target, "--installed")
 	cmd.Dir = filepath.Dir(target)
-	if err := cmd.Start(); err != nil { return false, err }
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 
